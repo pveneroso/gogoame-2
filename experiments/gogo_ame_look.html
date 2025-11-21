@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Go Go Ame - Visual Style Update + Wind + Complex Spawns</title>
+<style>
+  body { margin: 0; overflow: hidden; background-color: #dde1e6; /* Light Grayish Blue */ font-family: sans-serif; color: #333;} /* Text color for UI */
+  canvas { display: block; margin-bottom: 10px; background-color: #f0f2f5; /* Very Light Off-White/Gray */ cursor: grab; }
+  canvas.grabbing { cursor: grabbing; }
+  .controls { padding: 10px; background-color: #c8cdd4; user-select: none; color: #333; border-top: 1px solid #bbb; } /* Lighter controls */
+  .controls div { margin-bottom: 8px; display: flex; align-items: center; }
+  .controls label { display: inline-block; min-width: 180px; font-size: 0.9em; }
+  .controls input[type="range"] { width: 200px; vertical-align: middle; margin-right: 10px;}
+  .controls span { display: inline-block; min-width: 50px; text-align: right; font-weight: bold; font-size: 0.9em; }
+
+  /* UI Styling */
+  #ui { position: absolute; top: 15px; left: 1500px; font-size: 18px; color: #444; background-color: rgba(255,255,255,0.75); padding: 6px 10px; border-radius: 5px; z-index: 10; border: 1px solid #ccc;}
+  #gameOverScreen {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background-color: rgba(0,0,0,0.85); color: white; padding: 30px 40px;
+    border-radius: 10px; text-align: center; font-size: 24px; display: none; /* Hidden by default */
+    z-index: 20;
+  }
+  #gameOverScreen div:first-child { font-size: 48px; margin-bottom: 15px; }
+  #gameOverScreen button { font-size: 18px; padding: 10px 20px; margin-top: 25px; cursor: pointer; background-color: #555; color: white; border: none; border-radius: 5px; }
+  #gameOverScreen button:hover { background-color: #777; }
+</style>
+</head>
+<body>
+
+<div class="controls">
+  <div><label for="gravitySlider">Gravity:</label><input type="range" id="gravitySlider" min="0" max="0.1" step="0.005" value="0.05"><span id="gravityValue">0.050</span></div>
+  <div><label for="terminalVelSlider">Terminal Velocity:</label><input type="range" id="terminalVelSlider" min="0.2" max="3.5" step="0.1" value="0.5"><span id="terminalVelValue">0.5</span></div>
+  <div><label for="throwMultiplierSlider">Throw Multiplier:</label><input type="range" id="throwMultiplierSlider" min="0.02" max="0.30" step="0.01" value="0.10"><span id="throwMultiplierValue">0.10</span></div>
+  <div><label for="baseBallRadiusSlider">Base Ball Radius (L1):</label><input type="range" id="baseBallRadiusSlider" min="15" max="70" step="1" value="20"><span id="baseBallRadiusValue">20</span></div>
+  <div><label for="creationIntervalSlider">New Ball Interval (ms):</label><input type="range" id="creationIntervalSlider" min="100" max="3000" step="50" value="400"><span id="creationIntervalValue">400</span></div>
+  <div><label for="maxWindStrengthSlider">Max Wind Strength:</label><input type="range" id="maxWindStrengthSlider" min="0" max="0.03" step="0.001" value="0.000"><span id="maxWindStrengthValue">0.000</span></div>
+</div>
+
+<div id="ui">
+    Score: <span id="score">0</span> | Lives: <span id="lives">100</span> | Wind: <span id="currentWindDisplay">0.000</span>
+</div>
+<div id="gameOverScreen">
+    <div>終</div>
+    <div>Final Score: <span id="finalScore">0</span></div>
+    <button id="restartButton">Retry (再試行)</button>
+</div>
+
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+  const controlsDiv = document.querySelector('.controls');
+
+  // --- Game Configuration ---
+  const Config = {
+      Initial_Lives: 100,
+      Initial_Ratio_Black_To_Gray: 0.20,
+      Construction_Particle_Count: 20, Construction_Particle_Speed: 3,
+      Explosion_Particle_Count: 40, Explosion_Particle_Speed: 5,
+      Debris_Particle_Count: 10, Debris_Particle_Speed: 2.5,
+      Trail_Length: 60, 
+      Trail_Base_Alpha: 0.25,
+      Trail_LineWidth: 1.5,
+  };
+
+  let canvasWidth = window.innerWidth;
+  let canvasHeight = window.innerHeight - controlsDiv.offsetHeight - 10;
+  canvas.width = canvasWidth;
+  canvas.height = canvasHeight;
+
+  // --- Game State ---
+  let score = 0;
+  let lives = Config.Initial_Lives;
+  let gameOver = false;
+  let animationFrameId;
+
+  // --- Physics & Control Variables ---
+  let gravity = parseFloat(document.getElementById('gravitySlider').value);
+  let terminalVelocity = parseFloat(document.getElementById('terminalVelSlider').value);
+  let throwMultiplier = parseFloat(document.getElementById('throwMultiplierSlider').value);
+  let baseBallRadius = parseInt(document.getElementById('baseBallRadiusSlider').value);
+  let ballCreationInterval = parseInt(document.getElementById('creationIntervalSlider').value);
+
+  // Wind Variables
+  let maxWindStrength = parseFloat(document.getElementById('maxWindStrengthSlider').value);
+  let currentWind = 0;
+  let targetWind = 0;
+  let windChangeIntervalId = null;
+  const WIND_TARGET_UPDATE_INTERVAL_MS = 4000; // Update target wind every 4 seconds
+  const WIND_SMOOTHING_FACTOR = 0.0005; // Adjust for how quickly current wind follows target wind
+
+
+  // --- Colors ---
+  const symbolColorGray = 'rgba(80, 80, 80, 0.9)';
+  const symbolColorBlack = 'rgba(10, 10, 10, 1.0)';
+  const grabbedSymbolColor = 'rgba(0, 100, 200, 1.0)';
+
+  const particleConstructColor = { r: 80, g: 100, b: 150 };
+  const particleExplosionColor = { r: 100, g: 100, b: 100 };
+  const particleDebrisColor = { r: 120, g: 120, b: 120 };
+
+  const horizontalFriction = 0.99;
+  const bounceEfficiency = -0.5;
+  let REFERENCE_RADIUS = baseBallRadius;
+
+  let balls = [];
+  let ballCreationTimerId;
+  let grabbedBall = null;
+  let lastMouseX = 0, lastMouseY = 0;
+
+  let particles = [];
+  const PARTICLE_LIFETIME_MS = 600;
+  const PARTICLE_FRICTION = 0.96;
+
+
+  const symbolDefinitions = {
+    "S1_HORIZ": { level: 1, character: "一", recipe: null, sizeMultiplier: 1.0, eliminationPoints: 10, explosionRadiusUnits: 1.7, explosionEffectLevels: [1] },
+    "S1_VERT":  { level: 1, character: "丨", recipe: null, sizeMultiplier: 1.0, eliminationPoints: 10, explosionRadiusUnits: 1.7, explosionEffectLevels: [1] },
+    "S1_SWEEP": { level: 1, character: "丿", recipe: null, sizeMultiplier: 1.0, eliminationPoints: 10, explosionRadiusUnits: 1.7, explosionEffectLevels: [1] },
+    "S2_CROSS": { level: 2, character: "十", recipe: ["S1_HORIZ", "S1_VERT"], sizeMultiplier: 1.15, eliminationPoints: 30, explosionRadiusUnits: 2.2, explosionEffectLevels: [1, 2] },
+    "S2_CLIFF": { level: 2, character: "厂", recipe: ["S1_HORIZ", "S1_SWEEP"], sizeMultiplier: 1.15, eliminationPoints: 30, explosionRadiusUnits: 2.2, explosionEffectLevels: [1, 2] },
+    "S2_PERSON":{ level: 2, character: "亻", recipe: ["S1_VERT", "S1_SWEEP"], sizeMultiplier: 1.15, eliminationPoints: 30, explosionRadiusUnits: 2.2, explosionEffectLevels: [1, 2] },
+    "S3_STONE": { level: 3, character: "石", recipe: ["S2_CROSS", "S2_CLIFF"], sizeMultiplier: 1.3, eliminationPoints: 70, explosionRadiusUnits: 2.5, explosionEffectLevels: [1, 2, 3] },
+    "S3_TENPLUS":{level: 3, character: "什", recipe: ["S2_CROSS", "S2_PERSON"], sizeMultiplier: 1.3, eliminationPoints: 70, explosionRadiusUnits: 2.5, explosionEffectLevels: [1, 2, 3] },
+    "S3_CREATE":{ level: 3, character: "作", recipe: ["S2_CLIFF", "S2_PERSON"], sizeMultiplier: 1.3, eliminationPoints: 70, explosionRadiusUnits: 2.5, explosionEffectLevels: [1, 2, 3] },
+    "S4_GRASS": { level: 4, character: "艹", recipe: ["S3_STONE", "S3_TENPLUS"], sizeMultiplier: 1.45, eliminationPoints: 150, explosionRadiusUnits: 2.8, explosionEffectLevels: [1, 2, 3, 4] },
+    "S4_STEM":  { level: 4, character: "芈", recipe: ["S3_STONE", "S3_CREATE"], sizeMultiplier: 1.45, eliminationPoints: 150, explosionRadiusUnits: 2.8, explosionEffectLevels: [1, 2, 3, 4] },
+    "S4_BASE":  { level: 4, character: "廾", recipe: ["S3_TENPLUS", "S3_CREATE"], sizeMultiplier: 1.45, eliminationPoints: 150, explosionRadiusUnits: 2.8, explosionEffectLevels: [1, 2, 3, 4] }
+  };
+  
+  const L1_SYMBOLS = ["S1_HORIZ", "S1_VERT", "S1_SWEEP"];
+  const L2_SYMBOLS = Object.keys(symbolDefinitions).filter(id => symbolDefinitions[id].level === 2);
+  const L3_SYMBOLS = Object.keys(symbolDefinitions).filter(id => symbolDefinitions[id].level === 3);
+
+  // Define spawn probabilities for different levels
+  const SPAWN_CHANCE_L1 = 0.55; // 85% for Level 1
+  const SPAWN_CHANCE_L2 = 0.30; // 12% for Level 2
+  const SPAWN_CHANCE_L3 = 0.15; // 3% for Level 3
+
+  class Ball {
+    constructor(x, y, actualRadius, initialSymbolId, isBlack) {
+      this.x = x; this.y = y; this.vx = 0; this.vy = Math.random() * 0.2;
+      this.radius = actualRadius;
+      this.symbolId = initialSymbolId;
+      this.level = symbolDefinitions[initialSymbolId].level;
+      this.isGrabbed = false;
+      this.isBlack = isBlack;
+      this.prevX = x;
+      this.prevY = y;
+    }
+
+    draw() {
+      const symbolDef = symbolDefinitions[this.symbolId];
+      const symbolChar = symbolDef.character;
+      const fontSize = this.radius * 1.6;
+      
+      ctx.font = `bold ${fontSize}px Arial, Verdana, sans-serif`; 
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      const currentSymbolFillColor = this.isGrabbed ? grabbedSymbolColor : (this.isBlack ? symbolColorBlack : symbolColorGray);
+
+      const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+      if (speed > 0.05) {
+          const lengthMultiplier = 0.8 + Math.min(2.0, speed / (terminalVelocity * 0.30 + 0.1));
+          let actualTrailLength = Config.Trail_Length * lengthMultiplier;
+          actualTrailLength = Math.max(Config.Trail_Length * 0.5, actualTrailLength);
+          const trailDirX = -this.vx / speed;
+          const trailDirY = -this.vy / speed;
+          const trailStartX = this.x;
+          const trailStartY = this.y - (this.radius * 0.8); 
+          const trailEndX = trailStartX + trailDirX * actualTrailLength;
+          const trailEndY = trailStartY + trailDirY * actualTrailLength;
+          ctx.beginPath();
+          ctx.moveTo(trailStartX, trailStartY);
+          ctx.lineTo(trailEndX, trailEndY);
+          const alphaMultiplier = Math.min(1, Math.max(0.2, speed / (terminalVelocity * 0.5 + 0.1)));
+          const currentTrailAlpha = Config.Trail_Base_Alpha * alphaMultiplier;
+          ctx.strokeStyle = `rgba(160, 180, 220, ${currentTrailAlpha})`;
+          ctx.lineWidth = Config.Trail_LineWidth;
+          ctx.stroke();
+      }
+
+      ctx.fillStyle = currentSymbolFillColor;
+      ctx.globalAlpha = this.isBlack ? 1.0 : 0.85; 
+      ctx.fillText(symbolChar, this.x, this.y);
+      ctx.globalAlpha = 1.0; 
+    }
+
+    update() {
+      this.prevX = this.x;
+      this.prevY = this.y;
+
+      if (this.isGrabbed) {
+        this.x += this.vx; this.y += this.vy;
+        this.x = Math.max(this.radius, Math.min(this.x, canvasWidth - this.radius));
+        this.y = Math.max(this.radius, Math.min(this.y, canvasHeight - this.radius));
+        if (this.x === this.radius || this.x === canvasWidth - this.radius) this.vx = 0;
+        if (this.y === this.radius || this.y === canvasHeight - this.radius) this.vy = 0;
+      } else {
+        if (this.vy < terminalVelocity) this.vy += gravity; else if (this.vy > terminalVelocity) this.vy = terminalVelocity;
+        
+        this.vx += currentWind; // Apply wind acceleration
+
+        this.y += this.vy;
+        this.x += this.vx;
+        
+        this.vx *= horizontalFriction;
+
+        if (this.x - this.radius < 0) { this.x = this.radius; this.vx *= bounceEfficiency; }
+        else if (this.x + this.radius > canvasWidth) { this.x = canvasWidth - this.radius; this.vx *= bounceEfficiency; }
+
+        if (this.y + this.radius > canvasHeight && this.isBlack) {
+            handleLifeLoss(this);
+            spawnParticles(8, this.x, canvasHeight - 5, particleDebrisColor, 1.5, 1, 3, PARTICLE_LIFETIME_MS*0.5);
+            return false; // Signal removal
+        }
+        if (this.y - this.radius < 0 && this.vy < 0) { this.y = this.radius; this.vy *= bounceEfficiency; }
+      } return true; // Signal to keep ball
+    }
+  }
+
+  function handleLifeLoss(ball) { if (gameOver) return; lives--; updateUI(); console.log("Lost a life! Lives remaining:", lives); if (lives <= 0) { triggerGameOver(); } }
+  
+  function createBall() {
+    if (gameOver) return;
+
+    let selectedSymbolId = null;
+    const symbolLevelRand = Math.random(); // Random number for selecting symbol level
+
+    // Determine symbol level based on probabilities
+    if (symbolLevelRand < SPAWN_CHANCE_L1) {
+        if (L1_SYMBOLS.length > 0) {
+            selectedSymbolId = L1_SYMBOLS[Math.floor(Math.random() * L1_SYMBOLS.length)];
+        }
+    } else if (symbolLevelRand < SPAWN_CHANCE_L1 + SPAWN_CHANCE_L2) {
+        if (L2_SYMBOLS.length > 0) {
+            selectedSymbolId = L2_SYMBOLS[Math.floor(Math.random() * L2_SYMBOLS.length)];
+        }
+    } else { // Covers SPAWN_CHANCE_L3
+        if (L3_SYMBOLS.length > 0) {
+            selectedSymbolId = L3_SYMBOLS[Math.floor(Math.random() * L3_SYMBOLS.length)];
+        }
+    }
+
+    // Fallback: If no symbol was selected (e.g., an L2_SYMBOLS list was empty and that chance was hit),
+    // default to L1 to ensure a ball is always created.
+    if (!selectedSymbolId) {
+        if (L1_SYMBOLS.length > 0) { // L1_SYMBOLS should always be populated
+            selectedSymbolId = L1_SYMBOLS[Math.floor(Math.random() * L1_SYMBOLS.length)];
+        } else {
+            console.error("CRITICAL: No L1 symbols available to spawn as a fallback!");
+            return; // Exit if no symbols can be spawned at all
+        }
+    }
+
+    const symbolDef = symbolDefinitions[selectedSymbolId];
+    let actualRadius = baseBallRadius * symbolDef.sizeMultiplier;
+    actualRadius = Math.max(15, actualRadius); 
+
+    const x = Math.random() * (canvasWidth - actualRadius * 2) + actualRadius;
+    const y = -actualRadius - Math.random() * 20; 
+    const isBlack = Math.random() < Config.Initial_Ratio_Black_To_Gray; 
+
+    balls.push(new Ball(x, y, actualRadius, selectedSymbolId, isBlack));
+  }
+
+  function getCombinedSymbolId(id1, id2) { for (const symbolId in symbolDefinitions) { const def = symbolDefinitions[symbolId]; if (def.recipe) { if ((def.recipe[0] === id1 && def.recipe[1] === id2) || (def.recipe[0] === id2 && def.recipe[1] === id1)) { return symbolId; } } } return null; }
+  function spawnParticles(count, x, y, color, maxSpeed, minSize, maxSize, life = PARTICLE_LIFETIME_MS, outwardBias = true) { for (let i = 0; i < count; i++) { const angle = Math.random() * Math.PI * 2; const speed = Math.random() * maxSpeed + 0.5; particles.push({ x, y, vx: outwardBias ? Math.cos(angle) * speed : (Math.random() - 0.5) * maxSpeed * 1.5, vy: outwardBias ? Math.sin(angle) * speed : (Math.random() - 0.5) * maxSpeed * 1.5, radius: Math.random() * (maxSize - minSize) + minSize, color: color, alpha: 1.0, life: life * (Math.random() * 0.6 + 0.7), totalLife: life, }); } }
+
+  let ballsToRemoveThisFrame = [];
+  let ballsToAddNewThisFrame = [];
+
+  function processCollisions() { if (gameOver) return; ballsToRemoveThisFrame = []; ballsToAddNewThisFrame = [];
+    for (let i = 0; i < balls.length; i++) { let ballA = balls[i]; if (ballsToRemoveThisFrame.includes(ballA)) continue;
+      for (let j = i + 1; j < balls.length; j++) { let ballB = balls[j]; if (ballsToRemoveThisFrame.includes(ballB) || ballsToRemoveThisFrame.includes(ballA)) continue; if (ballA.isGrabbed || ballB.isGrabbed) continue;
+        const dx = ballA.x - ballB.x; const dy = ballA.y - ballB.y; const distance = Math.sqrt(dx * dx + dy * dy);
+        const interactionRadiusA = ballA.radius * 0.8; const interactionRadiusB = ballB.radius * 0.8;
+        if (distance < interactionRadiusA + interactionRadiusB && distance > 0.1) {
+          const midX = (ballA.x * ballB.radius + ballB.x * ballA.radius) / (ballA.radius + ballB.radius); const midY = (ballA.y * ballB.radius + ballB.y * ballA.radius) / (ballA.radius + ballB.radius); const symbolDefA = symbolDefinitions[ballA.symbolId];
+          if (ballA.symbolId === ballB.symbolId) { ballsToRemoveThisFrame.push(ballA, ballB); spawnParticles(Config.Explosion_Particle_Count, midX, midY, particleExplosionColor, Config.Explosion_Particle_Speed, 2, 5); score += symbolDefA.eliminationPoints; const actualExplosionRadius = symbolDefA.explosionRadiusUnits * baseBallRadius;
+            for (let k = 0; k < balls.length; k++) { const otherBall = balls[k]; if (ballsToRemoveThisFrame.includes(otherBall)) continue; const distToOther = Math.sqrt((otherBall.x - midX)**2 + (otherBall.y - midY)**2); if (distToOther < actualExplosionRadius + otherBall.radius) { if (symbolDefA.explosionEffectLevels.includes(otherBall.level)) { ballsToRemoveThisFrame.push(otherBall); spawnParticles(Config.Debris_Particle_Count, otherBall.x, otherBall.y, particleDebrisColor, Config.Debris_Particle_Speed, 1, 3); } } } break;
+          } else { const combinedSymId = getCombinedSymbolId(ballA.symbolId, ballB.symbolId);
+            if (combinedSymId) { ballsToRemoveThisFrame.push(ballA, ballB); const productDef = symbolDefinitions[combinedSymId]; let newRadius = baseBallRadius * productDef.sizeMultiplier; newRadius = Math.max(15, newRadius); const totalMassProxy = ballA.radius + ballB.radius; const newVx = (ballA.vx * ballA.radius + ballB.vx * ballB.radius) / totalMassProxy; const newVy = (ballA.vy * ballA.radius + ballB.vy * ballB.radius) / totalMassProxy; const newIsBlack = ballA.isBlack || ballB.isBlack; const newBall = new Ball(midX, midY, newRadius, combinedSymId, newIsBlack); newBall.vx = newVx; newBall.vy = newVy; ballsToAddNewThisFrame.push(newBall); spawnParticles(Config.Construction_Particle_Count, midX, midY, particleConstructColor, Config.Construction_Particle_Speed, 1, 4, PARTICLE_LIFETIME_MS * 0.6, false); break;
+            } else { const overlap = (interactionRadiusA + interactionRadiusB) - distance; const pushFactor = 0.08; const pushX = (dx / distance) * overlap * pushFactor; const pushY = (dy / distance) * overlap * pushFactor; const totalRadius = ballA.radius + ballB.radius; if (totalRadius > 0) { ballA.vx += pushX * (ballB.radius / totalRadius); ballA.vy += pushY * (ballB.radius / totalRadius); ballB.vx -= pushX * (ballA.radius / totalRadius); ballB.vy -= pushY * (ballA.radius / totalRadius); } }
+          } } } }
+    if (ballsToRemoveThisFrame.length > 0) { balls = balls.filter(b => !ballsToRemoveThisFrame.includes(b)); }
+    if (ballsToAddNewThisFrame.length > 0) { balls.push(...ballsToAddNewThisFrame); }
+  }
+
+  function updateAndDrawParticles(deltaTime) {
+    for (let i = particles.length - 1; i >= 0; i--) { 
+        const p = particles[i]; 
+        p.x += p.vx * (deltaTime / 16.67); 
+        p.y += p.vy * (deltaTime / 16.67); 
+        p.vx *= PARTICLE_FRICTION; 
+        p.vy *= PARTICLE_FRICTION; 
+        p.vy += gravity * 0.1 * (deltaTime / 16.67); 
+        p.vx += currentWind * 0.1 * (deltaTime / 16.67); // Wind affects particles
+        p.life -= deltaTime; 
+        p.alpha = Math.max(0, p.life / p.totalLife); 
+        if (p.life <= 0) { 
+            particles.splice(i, 1); 
+        } else { 
+            ctx.fillStyle = `rgba(${p.color.r}, ${p.color.g}, ${p.color.b}, ${p.alpha * 0.8})`; 
+            ctx.beginPath(); 
+            let drawRadius = p.radius * (p.alpha * 0.5 + 0.5); 
+            drawRadius = Math.max(0, drawRadius); 
+            ctx.arc(p.x, p.y, drawRadius, 0, Math.PI * 2); 
+            ctx.fill(); 
+        } 
+    } 
+}
+
+
+  canvas.addEventListener('mousedown', function(event) { if (gameOver) return; const rect = canvas.getBoundingClientRect(); const clickX = event.clientX - rect.left; const clickY = event.clientY - rect.top; for (let i = balls.length - 1; i >= 0; i--) { let ball = balls[i]; if (ball.isGrabbed) continue; const distance = Math.sqrt((clickX - ball.x)**2 + (clickY - ball.y)**2); if (distance < ball.radius * 1.1) { grabbedBall = ball; grabbedBall.isGrabbed = true; grabbedBall.vx = 0; grabbedBall.vy = 0; lastMouseX = event.clientX; lastMouseY = event.clientY; canvas.classList.add('grabbing'); break; } } });
+  document.addEventListener('mousemove', function(event) { if (grabbedBall) { const mouseDx = event.clientX - lastMouseX; const mouseDy = event.clientY - lastMouseY; let massFactor = grabbedBall.radius / REFERENCE_RADIUS; massFactor = Math.max(0.33, Math.min(massFactor, 3.0)); grabbedBall.vx = (mouseDx * throwMultiplier) / massFactor; grabbedBall.vy = (mouseDy * throwMultiplier) / massFactor; lastMouseX = event.clientX; lastMouseY = event.clientY; } });
+  document.addEventListener('mouseup', function() { if (grabbedBall) { grabbedBall.isGrabbed = false; grabbedBall = null; canvas.classList.remove('grabbing'); } });
+
+  function updateUI() { document.getElementById('score').textContent = score; document.getElementById('lives').textContent = lives; }
+  
+  function updateTargetWind() {
+    if (gameOver) { 
+        targetWind = 0;
+        return;
+    }
+    if (maxWindStrength > 0) {
+        targetWind = (Math.random() * 2 - 1) * maxWindStrength;
+    } else {
+        targetWind = 0;
+    }
+  }
+
+  function triggerGameOver() { 
+    if (gameOver) return; 
+    console.log("Game Over! Final Score:", score); 
+    gameOver = true; 
+    if (ballCreationTimerId) {
+        clearInterval(ballCreationTimerId);
+        ballCreationTimerId = null; 
+    }
+    if (windChangeIntervalId) { 
+        clearInterval(windChangeIntervalId);
+        windChangeIntervalId = null;
+    }
+    targetWind = 0; 
+    document.getElementById('finalScore').textContent = score; 
+    document.getElementById('gameOverScreen').style.display = 'block'; 
+  }
+  
+  function resetGame() { 
+    console.log("Resetting game..."); 
+    score = 0; 
+    lives = Config.Initial_Lives; 
+    balls = []; 
+    particles = []; 
+    grabbedBall = null; 
+    gameOver = false; 
+    
+    updateUI(); 
+    document.getElementById('gameOverScreen').style.display = 'none'; 
+    
+    if (ballCreationTimerId) clearInterval(ballCreationTimerId); 
+    if (ballCreationInterval > 0) { 
+        ballCreationTimerId = setInterval(createBall, ballCreationInterval); 
+    } 
+    
+    currentWind = 0;
+    targetWind = 0; 
+    document.getElementById('currentWindDisplay').textContent = currentWind.toFixed(3);
+    if (windChangeIntervalId) clearInterval(windChangeIntervalId);
+    windChangeIntervalId = null;
+
+    if (maxWindStrength > 0 && !gameOver) { 
+        updateTargetWind(); 
+        windChangeIntervalId = setInterval(updateTargetWind, WIND_TARGET_UPDATE_INTERVAL_MS);
+    }
+    
+    lastFrameTime = performance.now(); 
+    if(animationFrameId) cancelAnimationFrame(animationFrameId); 
+    animationFrameId = requestAnimationFrame(gameLoop); 
+  }
+  document.getElementById('restartButton').addEventListener('click', resetGame);
+
+  let lastFrameTime = performance.now();
+  function gameLoop(currentTime) {
+    const deltaTime = currentTime - lastFrameTime; 
+    lastFrameTime = currentTime;
+
+    if (deltaTime > 0) { 
+        let windRampFactor = WIND_SMOOTHING_FACTOR * deltaTime;
+        if (gameOver) {
+            if (Math.abs(currentWind) > 0.0001) windRampFactor *= 3; 
+        }
+        currentWind += (targetWind - currentWind) * windRampFactor;
+        
+        if (maxWindStrength > 0) {
+             currentWind = Math.max(-maxWindStrength * 1.05, Math.min(maxWindStrength * 1.05, currentWind)); 
+        } else {
+            if (targetWind === 0) currentWind = 0; 
+        }
+    }
+    document.getElementById('currentWindDisplay').textContent = currentWind.toFixed(3);
+    
+    if (!gameOver) {
+        processCollisions(); 
+    }
+    
+    for (let i = balls.length - 1; i >= 0; i--) { 
+        const ball = balls[i]; 
+        if (!ball.update()) { 
+            balls.splice(i, 1); 
+        } 
+    }
+
+    ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+    updateAndDrawParticles(deltaTime); 
+    for (const ball of balls) { 
+        ball.draw(); 
+    }
+    
+    if (!gameOver) { 
+      updateUI();
+    }
+    
+    animationFrameId = requestAnimationFrame(gameLoop);
+  }
+
+  document.getElementById('gravitySlider').oninput = function() { gravity = parseFloat(this.value); document.getElementById('gravityValue').textContent = parseFloat(this.value).toFixed(3); }
+  document.getElementById('terminalVelSlider').oninput = function() { terminalVelocity = parseFloat(this.value); document.getElementById('terminalVelValue').textContent = parseFloat(this.value).toFixed(1); }
+  document.getElementById('throwMultiplierSlider').oninput = function() { throwMultiplier = parseFloat(this.value); document.getElementById('throwMultiplierValue').textContent = parseFloat(this.value).toFixed(2); }
+  document.getElementById('baseBallRadiusSlider').oninput = function() { baseBallRadius = parseInt(this.value); document.getElementById('baseBallRadiusValue').textContent = this.value; REFERENCE_RADIUS = baseBallRadius; }
+  document.getElementById('creationIntervalSlider').oninput = function() {
+    ballCreationInterval = parseInt(this.value);
+    document.getElementById('creationIntervalValue').textContent = this.value;
+    clearInterval(ballCreationTimerId);
+    if (ballCreationInterval > 0 && !gameOver) {
+        ballCreationTimerId = setInterval(createBall, ballCreationInterval);
+    }
+  }
+  document.getElementById('maxWindStrengthSlider').oninput = function() {
+    maxWindStrength = parseFloat(this.value);
+    document.getElementById('maxWindStrengthValue').textContent = parseFloat(this.value).toFixed(3);
+
+    targetWind = Math.max(-maxWindStrength, Math.min(maxWindStrength, targetWind));
+    
+    if (maxWindStrength > 0) {
+        if (!windChangeIntervalId && !gameOver) { 
+            updateTargetWind(); 
+            windChangeIntervalId = setInterval(updateTargetWind, WIND_TARGET_UPDATE_INTERVAL_MS);
+        }
+    } else { 
+        targetWind = 0; 
+        currentWind = 0; 
+        document.getElementById('currentWindDisplay').textContent = currentWind.toFixed(3);
+        if (windChangeIntervalId) {
+            clearInterval(windChangeIntervalId);
+            windChangeIntervalId = null;
+        }
+    }
+  };
+
+  function resizeCanvas() { 
+      canvasWidth = window.innerWidth; 
+      canvasHeight = window.innerHeight - controlsDiv.offsetHeight - 10; 
+      if (canvasHeight < 50) canvasHeight = 50; 
+      canvas.width = canvasWidth; 
+      canvas.height = canvasHeight; 
+  }
+
+  document.getElementById('gravityValue').textContent = parseFloat(gravity).toFixed(3);
+  document.getElementById('terminalVelValue').textContent = parseFloat(terminalVelocity).toFixed(1);
+  document.getElementById('throwMultiplierValue').textContent = parseFloat(throwMultiplier).toFixed(2);
+  document.getElementById('baseBallRadiusValue').textContent = baseBallRadius;
+  REFERENCE_RADIUS = baseBallRadius; 
+  document.getElementById('creationIntervalValue').textContent = ballCreationInterval;
+  
+  document.getElementById('maxWindStrengthValue').textContent = parseFloat(maxWindStrength).toFixed(3);
+  document.getElementById('currentWindDisplay').textContent = currentWind.toFixed(3); 
+
+  updateUI(); 
+  resizeCanvas(); 
+  window.addEventListener('resize', resizeCanvas); 
+
+  if (ballCreationInterval > 0 && !gameOver) { 
+      ballCreationTimerId = setInterval(createBall, ballCreationInterval);
+  }
+  
+  if (maxWindStrength > 0 && !gameOver) {
+      updateTargetWind(); 
+      windChangeIntervalId = setInterval(updateTargetWind, WIND_TARGET_UPDATE_INTERVAL_MS);
+  }
+
+  lastFrameTime = performance.now(); 
+  animationFrameId = requestAnimationFrame(gameLoop); 
+
+</script>
+</body>
+</html>

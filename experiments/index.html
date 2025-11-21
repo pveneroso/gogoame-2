@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Word Neighbor Explorer</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 20px;
+      }
+      .word-container {
+        margin-bottom: 20px;
+      }
+      .neighbor {
+        cursor: pointer;
+        color: blue;
+        text-decoration: underline;
+      }
+      .win-message {
+        color: green;
+        font-size: 1.5em;
+        margin-top: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Word Neighbor Explorer</h1>
+    <!-- Input fields for setting word and target word -->
+    <div style="display: none;">
+      <label for="wordInput">Word:</label>
+      <input type="text" id="wordInput" placeholder="Enter word" />
+
+      <label for="targetWordInput">Target Word:</label>
+      <input type="text" id="targetWordInput" placeholder="Enter target word" />
+
+      <button id="setWordsButton">Set Words</button>
+    </div>
+
+    <div id="wordContainer" class="word-container">
+      <h2 id="mainWord"></h2>
+      <button id="showPathButton">Show / Hide Tips</button>
+      <p id="pathToTarget" style="display: none"></p>
+      <!-- Hidden path element -->
+      <p>Target Word: <strong id="targetWord"></strong></p>
+      <p>Neighbors:</p>
+      <ul id="neighborList"></ul>
+      <div id="winMessage" class="win-message" style="display: none">
+        Congratulations! You've reached the target word!
+      </div>
+    </div>
+
+    <script>
+      let targetWord = ""; // Store the target word globally
+      let distancesDict = {}; // Store the distances to the target word
+      let parentsDict = {}; // Store the parents used to reach word
+      let displayHopDistance = true;
+      let showTips = false;
+      // let k = 5;
+      let k = 1000;
+      let wordDict = undefined;
+
+      // BFS Function to calculate hop distances and store paths, considering only the first k neighbors.
+      function calculateHopDistances(targetWord, dictionary, k = 1000) {
+        const queue = [targetWord]; // BFS queue
+
+        distancesDict[targetWord] = 0; // Distance to the target word is 0
+        parentsDict[targetWord] = null; // Target has no parent
+
+        while (queue.length > 0) {
+          const currentWord = queue.shift();
+          const currentDistance = distancesDict[currentWord];
+
+          // Get the first k neighbors (or fewer if there are not enough neighbors)
+          const neighbors = dictionary[currentWord].slice(0, k);
+
+          // Process each neighbor
+          neighbors.forEach((neighborObj) => {
+            const neighborWord = neighborObj.neighbor;
+
+            // If the neighbor hasn't been visited yet, process it
+            if (!(neighborWord in distancesDict)) {
+              distancesDict[neighborWord] = currentDistance + 1; // Increment distance
+              parentsDict[neighborWord] = currentWord; // Set the parent to backtrack the path
+              queue.push(neighborWord); // Add neighbor to the queue for further BFS
+            }
+          });
+        }
+      }
+
+      function parseBase64File(base64String) {
+        const decodedString = atob(base64String);
+        const lines = decodedString.split("\n");
+
+        const wordList = [];
+        lines.forEach((line) => {
+          if (line.trim() !== "") {
+            const [word] = line.split("|", 1);
+            wordList.push(word);
+          }
+        });
+
+        let display = true;
+
+        const wordDictionary = {};
+        lines.forEach((line) => {
+          if (line.trim() === "") return; // Skip empty lines
+
+          const indexOfFirstPipe = line.indexOf("|");
+          const word = line.slice(0, indexOfFirstPipe);
+          const neighborsStr = line.slice(indexOfFirstPipe + 1);
+
+          if (display) {
+            display = false;
+          }
+
+          const neighbors = neighborsStr.split("|").map((neighbor) => {
+            const [index, distance] = neighbor.split(":");
+            return {
+              neighbor: wordList[parseInt(index, 10)], // Get the actual word by index
+              distance: parseFloat(distance), // Distance (as float)
+            };
+          });
+
+          // Add neighbors to the current word
+          wordDictionary[word] = neighbors;
+        });
+
+        // Iterate over the Map and sort each neighbors array by distance
+        for (let word in wordDictionary) {
+          wordDictionary[word].sort((a, b) => a.distance - b.distance); // Sort neighbors by distance
+
+          // Prune the neighbors to keep only the first k
+          wordDictionary[word] = wordDictionary[word].slice(0, k);
+        }
+
+        for (let word in wordDictionary) {
+          let neighbors = wordDictionary[word];
+
+          // Now make the graph undirected by adding the reverse relationship
+          neighbors.forEach(({ neighbor, distance }) => {
+            if (!wordDictionary[neighbor]) {
+              wordDictionary[neighbor] = []; // If the neighbor doesn't have an entry, create one
+            }
+
+            // Check if the word is already a neighbor of this neighbor
+            const alreadyNeighbor = wordDictionary[neighbor].some((n) => n.neighbor === word);
+
+            // If it's not already a neighbor, add it
+            if (!alreadyNeighbor) {
+              wordDictionary[neighbor].push({
+                neighbor: word, // Add the original word as a neighbor
+                distance: distance, // Use the same distance for the reverse relationship
+                added_neighbor: true,
+              });
+            }
+          });
+        }
+
+        // Iterate over the Map and sort each neighbors array by distance
+        for (let word in wordDictionary) {
+          wordDictionary[word].sort((a, b) => a.distance - b.distance); // Sort neighbors by distance
+
+          // Prune the neighbors to keep only the first k
+          // wordDictionary[word] = wordDictionary[word].slice(0, k);
+        }
+
+        return wordDictionary;
+      }
+
+      // Function to reconstruct the path from any word to the target
+      function reconstructPath(word, targetWord, parents) {
+        const path = [];
+        let currentWord = word;
+
+        // Backtrack using the parents until we reach the target
+        while (currentWord !== null) {
+          path.unshift(currentWord); // Add the word at the beginning to get the correct order
+          currentWord = parents[currentWord];
+        }
+
+        return path.reverse(); // Return the path from word to target
+      }
+
+      // Function to get random words that aren't in the current neighbor list
+      function getRandomWords(currentWord, dictionary, excludeWords, count) {
+        const allWords = Object.keys(dictionary);
+        const randomWords = [];
+        while (randomWords.length < count) {
+          const randomWord = allWords[Math.floor(Math.random() * allWords.length)];
+          if (
+            randomWord !== currentWord &&
+            !excludeWords.includes(randomWord) &&
+            !randomWords.includes(randomWord)
+          ) {
+            randomWords.push(randomWord);
+          }
+        }
+        return randomWords;
+      }
+
+      // Function to display a word and its neighbors
+      function displayWord(word, dictionary) {
+        const mainWordElement = document.getElementById("mainWord");
+        const neighborListElement = document.getElementById("neighborList");
+        const winMessageElement = document.getElementById("winMessage");
+        const pathElement = document.getElementById("pathToTarget"); // Hidden path element
+        const showPathButton = document.getElementById("showPathButton"); // Button to reveal path
+
+        // Clear the neighbor list
+        neighborListElement.innerHTML = "";
+        pathElement.style.display = "none"; // Hide path initially
+
+        // Set the main word and its hop distance to the target word
+        const hopDistance = distancesDict[word]; // Get hop distance from the BFS result
+        mainWordElement.textContent = `${word} (Distance to Target: ${hopDistance})`;
+
+        // Check if the word is the target word and display the win message
+        if (word === targetWord) {
+          winMessageElement.style.display = "block"; // Show the win message
+          return; // No need to display neighbors if the user has won
+        } else {
+          winMessageElement.style.display = "none"; // Hide the win message
+        }
+
+        // Show path to target when the button is clicked
+        showPathButton.onclick = function () {
+          showTips = !showTips;
+          displayWord(word, dictionary);
+        };
+
+        if (showTips) {
+          const path = reconstructPath(word, targetWord, parentsDict); // Get the shortest path
+          pathElement.textContent = `${path.join(" → ")}`;
+          pathElement.style.display = "block"; // Reveal the path
+        }
+
+        // Get neighbors from the dictionary
+        const neighbors = dictionary[word];
+
+        // Select the first k neighbors (if available)
+        const firstNeighbors = neighbors;
+        // const firstNeighbors = neighbors.slice(0, 10);
+
+        // Add first five neighbors to the list
+        firstNeighbors.forEach((neighbor) => {
+          const li = document.createElement("li");
+          const hopDistance = distancesDict[neighbor.neighbor];
+          if (displayHopDistance) {
+            li.textContent = `${neighbor.neighbor} (Distance: ${neighbor.distance})`;
+            if (showTips) {
+              li.textContent += ` (to Target: ${hopDistance})`;
+            }
+          } else {
+            li.textContent = `${neighbor.neighbor} (Distance: ${neighbor.distance})`;
+          }
+
+          if (neighbor.added_neighbor) {
+            li.textContent += " *";
+          }
+
+          li.classList.add("neighbor");
+          li.addEventListener("click", () => displayWord(neighbor.neighbor, dictionary));
+          neighborListElement.appendChild(li);
+        });
+
+        // Get five random words that are not part of the neighbors
+        // const excludeWords = firstNeighbors.map((n) => n.neighbor);
+        // const randomWords = getRandomWords(word, dictionary, excludeWords, 5);
+
+        // Add random words to the list
+        // randomWords.forEach((randomWord) => {
+        //   const li = document.createElement("li");
+        //   li.textContent = `${randomWord} (Random Word)`;
+        //   const hopDistance = distancesDict[randomWord];
+        //   if (displayHopDistance) {
+        //     li.textContent = `${randomWord} (Random Word) (to Target: ${hopDistance})`;
+        //   } else {
+        //     li.textContent = `${randomWord} (Random Word)`;
+        //   }
+        //   li.classList.add("neighbor");
+        //   li.addEventListener("click", () => displayWord(randomWord, dictionary));
+        //   neighborListElement.appendChild(li);
+        // });
+      }
+
+      // Set the word and target word based on user input
+      document.getElementById("setWordsButton").addEventListener("click", function () {
+        let word = document.getElementById("wordInput").value;
+
+        targetWord = document.getElementById("targetWordInput").value;
+        document.getElementById("targetWord").textContent = targetWord;
+
+        // Call BFS to calculate distances and paths
+        distancesDict = {};
+        parentsDict = {};
+        calculateHopDistances(targetWord, wordDict);
+
+        // Display the word and its neighbors
+        displayWord(word, wordDict);
+      });
+
+      fetch(
+        "https://raw.githubusercontent.com/jmfveneroso/word_game/refs/heads/main/compressed_words_base64.txt",
+      )
+        .then((response) => response.text())
+        .then((base64Content) => {
+          wordDict = parseBase64File(base64Content);
+
+          const wordList = Object.keys(wordDict);
+          const randomWord = wordList[Math.floor(Math.random() * wordList.length)];
+
+          // Pick a random target word that is different from the random word
+          do {
+            targetWord = wordList[Math.floor(Math.random() * wordList.length)];
+          } while (targetWord === randomWord);
+
+          // Display the target word in the UI
+          document.getElementById("targetWord").textContent = targetWord;
+
+          calculateHopDistances(targetWord, wordDict);
+
+          // Display the random word and its neighbors
+          displayWord(randomWord, wordDict);
+        })
+        .catch((error) => {
+          console.error("Error fetching the file:", error);
+        });
+    </script>
+  </body>
+</html>

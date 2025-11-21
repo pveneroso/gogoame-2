@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic Figure Generator</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            padding: 20px;
+            background-color: #f0f0f0;
+            color: #333;
+        }
+        .container {
+            display: flex;
+            gap: 40px;
+            align-items: center;
+        }
+        canvas {
+            border: 1px solid #ccc;
+            background-color: #fff;
+        }
+        .controls {
+            width: 300px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        label {
+            font-weight: bold;
+        }
+        input[type="range"] {
+            width: 100%;
+        }
+        select {
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+        }
+        .value-display {
+            font-size: 0.9em;
+            color: #555;
+            text-align: right;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <canvas id="mainCanvas" width="500" height="500"></canvas>
+        <div class="controls">
+            <h2>Controls</h2>
+            <div class="control-group">
+                <label for="innerRadius">Inner Circle Radius</label>
+                <input type="range" id="innerRadius" min="0" max="100" value="20">
+                <span class="value-display" id="innerRadiusValue">20px</span>
+            </div>
+            <div class="control-group">
+                <label for="numPoints">Number of Points</label>
+                <input type="range" id="numPoints" min="2" max="30" value="7">
+                <span class="value-display" id="numPointsValue">7</span>
+            </div>
+            <div class="control-group">
+                <label for="spikeDistance">Spike Distance from Center</label>
+                <input type="range" id="spikeDistance" min="0" max="230" value="100">
+                <span class="value-display" id="spikeDistanceValue">100px</span>
+            </div>
+            <div class="control-group">
+                <label for="leafCurves">Leaf Curves</label>
+                <select id="leafCurves">
+                    <option value="left">Left Only</option>
+                    <option value="right">Right Only</option>
+                    <option value="both" selected>Both (Full Leaf)</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label for="figureColor">Figure Color</label>
+                <select id="figureColor">
+                    <option value="white">White</option>
+                    <option value="gray">Gray</option>
+                    <option value="black" selected>Black</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- Get DOM Elements ---
+            const canvas = document.getElementById('mainCanvas');
+            const ctx = canvas.getContext('2d');
+
+            const controls = {
+                innerRadius: document.getElementById('innerRadius'),
+                numPoints: document.getElementById('numPoints'),
+                spikeDistance: document.getElementById('spikeDistance'),
+                leafCurves: document.getElementById('leafCurves'),
+                figureColor: document.getElementById('figureColor')
+            };
+
+            const valueDisplays = {
+                innerRadius: document.getElementById('innerRadiusValue'),
+                numPoints: document.getElementById('numPointsValue'),
+                spikeDistance: document.getElementById('spikeDistanceValue')
+            };
+
+            const center = { x: canvas.width / 2, y: canvas.height / 2 };
+
+            // --- Drawing Logic ---
+            function draw() {
+                // Get current values from controls
+                const innerRadius = parseInt(controls.innerRadius.value);
+                const numPoints = parseInt(controls.numPoints.value);
+                const spikeDistance = parseInt(controls.spikeDistance.value);
+                const leafType = controls.leafCurves.value;
+                const color = controls.figureColor.value;
+
+                // Update value displays
+                valueDisplays.innerRadius.textContent = `${innerRadius}px`;
+                valueDisplays.numPoints.textContent = numPoints;
+                valueDisplays.spikeDistance.textContent = `${spikeDistance}px`;
+
+                // Set canvas background based on figure color for contrast
+                ctx.fillStyle = (color === 'white') ? 'black' : 'white';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                // Set drawing styles
+                ctx.strokeStyle = color;
+                ctx.fillStyle = color;
+                ctx.lineWidth = 2;
+
+                // Begin drawing path
+                ctx.beginPath();
+                
+                // 1. Draw Inner Circle
+                ctx.arc(center.x, center.y, innerRadius, 0, 2 * Math.PI);
+                ctx.fill();
+
+                // 2. Draw Leaves/Spikes
+                for (let i = 0; i < numPoints; i++) {
+                    const angle = (i / numPoints) * 2 * Math.PI;
+
+                    // Calculate start and end points for the curve
+                    const startX = center.x + innerRadius * Math.cos(angle);
+                    const startY = center.y + innerRadius * Math.sin(angle);
+                    const endX = center.x + spikeDistance * Math.cos(angle);
+                    const endY = center.y + spikeDistance * Math.sin(angle);
+
+                    // Calculate control point for the curve
+                    // This creates the "bend" in the leaf
+                    const midX = (startX + endX) / 2;
+                    const midY = (startY + endY) / 2;
+                    const anglePerp = angle + Math.PI / 2; // Perpendicular angle
+                    const curveAmount = 40; // How much the leaf bends
+
+                    const cpX = midX + curveAmount * Math.cos(anglePerp);
+                    const cpY = midY + curveAmount * Math.sin(anglePerp);
+                    
+                    const cpX_inv = midX - curveAmount * Math.cos(anglePerp);
+                    const cpY_inv = midY - curveAmount * Math.sin(anglePerp);
+                    
+                    ctx.beginPath();
+                    
+                    if (leafType === 'right' || leafType === 'both') {
+                        ctx.moveTo(startX, startY);
+                        ctx.quadraticCurveTo(cpX, cpY, endX, endY);
+                        ctx.stroke();
+                    }
+                    if (leafType === 'left' || leafType === 'both') {
+                        ctx.moveTo(startX, startY);
+                        ctx.quadraticCurveTo(cpX_inv, cpY_inv, endX, endY);
+                        ctx.stroke();
+                    }
+                }
+            }
+
+            // --- Event Listeners ---
+            Object.values(controls).forEach(control => {
+                control.addEventListener('input', draw);
+            });
+
+            // --- Initial Draw ---
+            draw();
+        });
+    </script>
+
+</body>
+</html>

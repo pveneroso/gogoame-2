@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Metallic Ball in a Single HTML File</title>
+    <style>
+        /* Basic CSS to center the canvas on the page */
+        body {
+            background-color: #f0f0f0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        canvas {
+            border: 1px solid #ccc;
+            background-color: #fff;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="myCanvas" width="400" height="400"></canvas>
+
+    <script>
+        // All the drawing logic is contained within this script tag
+        
+        // 1. SETUP
+        // Get the canvas element from the HTML and its 2D rendering context
+        const canvas = document.getElementById('myCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Define the properties for our ball
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
+        const radius = 80;
+
+        // 2. CREATE THE METALLIC GRADIENT
+        // To make it look metallic, we simulate a light source by offsetting the gradient's start point.
+        const highlightX = centerX - radius * 0.4;
+        const highlightY = centerY - radius * 0.4;
+
+        // Create a radial gradient object.
+        // The gradient goes from a small inner circle (the highlight) to a large outer circle (the ball's edge).
+        let gradient = ctx.createRadialGradient(
+            highlightX,   // x-coordinate of the start circle
+            highlightY,   // y-coordinate of the start circle
+            radius * 0.1, // Radius of the start circle (a small bright spot)
+            centerX,      // x-coordinate of the end circle (center of the ball)
+            centerY,      // y-coordinate of the end circle (center of the ball)
+            radius        // Radius of the end circle (the full size of the ball)
+        );
+
+        // Add color stops to the gradient to create the silver metallic sheen.
+        // The colors transition from a bright white highlight to dark grey shadows.
+        gradient.addColorStop(0, '#FFFFFF');   // Brightest point of the highlight
+        gradient.addColorStop(0.5, '#A0A0A0');   // Mid-tone grey
+        gradient.addColorStop(0.9, '#404040');   // Darker edge color
+        gradient.addColorStop(1, '#202020');     // Deepest shadow at the very edge
+
+        /* // --- Optional: GOLD BALL COLORS ---
+        // To make a gold ball, comment out the silver colors above and uncomment these:
+        gradient.addColorStop(0, '#FFFDE4');   // Brightest yellow-white highlight
+        gradient.addColorStop(0.5, '#FFD700');   // Standard gold color
+        gradient.addColorStop(0.9, '#A67C00');   // Darker, rich gold
+        gradient.addColorStop(1, '#614700');     // Deepest brown-gold shadow
+        */
+        
+        // 3. DRAW THE MAIN BALL
+        // Assign the gradient we just created as the fill style
+        ctx.fillStyle = gradient;
+
+        // Begin drawing the path for the circle
+        ctx.beginPath();
+        // Draw the arc that defines the circle
+        ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+        // Fill the circle with our gradient
+        ctx.fill();
+        // Finalize the path
+        ctx.closePath();
+
+
+        // 4. (Optional) ADD A SHARPER "GLINT" FOR EXTRA SHINE
+        // This adds a second, brighter highlight to simulate a direct light reflection.
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.8)'; // Use a semi-transparent white
+
+        // Draw a small circle for the glint, centered on our highlight position
+        ctx.beginPath();
+        ctx.arc(highlightX, highlightY, radius * 0.15, 0, 2 * Math.PI);
+        ctx.fill();
+        ctx.closePath();
+
+    </script>
+</body>
+</html>

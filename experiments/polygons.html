@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Advanced Poly-Petal Mandala Generator</title>
+    <style>
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+          Arial, sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        margin: 0;
+        padding: 20px;
+        background-color: #121212;
+        color: #e0e0e0;
+        text-align: center;
+      }
+      h1 {
+        color: #bb86fc;
+      }
+      .container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 30px;
+        justify-content: center;
+        align-items: flex-start;
+      }
+      canvas {
+        background-color: #1e1e1e;
+        border-radius: 8px;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
+      }
+      .controls {
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+        width: 320px;
+        padding: 20px;
+        background-color: #2a2a2a;
+        border-radius: 8px;
+        text-align: left;
+      }
+      .control-group label {
+        font-weight: bold;
+        font-size: 1em;
+        display: block;
+        margin-bottom: 5px;
+      }
+      input[type="range"] {
+        width: 100%;
+      }
+      select,
+      input[type="color"] {
+        width: 100%;
+        padding: 8px;
+        border-radius: 5px;
+        border: 1px solid #444;
+        background-color: #333;
+        color: #f0f0f0;
+        font-size: 1em;
+      }
+      .value-display {
+        font-size: 0.9em;
+        color: #03dac6;
+        font-weight: bold;
+        float: right;
+      }
+      p {
+        max-width: 600px;
+        line-height: 1.6;
+        color: #ccc;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Advanced Poly-Petal Mandala Generator</h1>
+    <p>
+      Use radial symmetry to create mandalas. Now with controls to stretch and
+      squeeze each petal shape for more complex, elongated patterns.
+    </p>
+
+    <div class="container">
+      <div class="controls">
+        <div class="control-group">
+          <label
+            >Main Symmetry Petals<span class="value-display" id="numPetalsValue"
+              >12</span
+            ></label
+          >
+          <input type="range" id="numPetals" min="2" max="60" value="12" />
+        </div>
+        <div class="control-group">
+          <label
+            >Petal Shape (Sides)<span
+              class="value-display"
+              id="petalSegmentsValue"
+              >5 (Pentagon)</span
+            ></label
+          >
+          <input type="range" id="petalSegments" min="3" max="20" value="5" />
+        </div>
+        <div class="control-group">
+          <label
+            >Petal Distance<span class="value-display" id="petalDistanceValue"
+              >150</span
+            ></label
+          >
+          <input
+            type="range"
+            id="petalDistance"
+            min="0"
+            max="250"
+            value="150"
+          />
+        </div>
+        <div class="control-group">
+          <label
+            >Petal Size<span class="value-display" id="petalSizeValue"
+              >50</span
+            ></label
+          >
+          <input type="range" id="petalSize" min="5" max="150" value="50" />
+        </div>
+        <div class="control-group">
+          <label
+            >Petal Width (Stretch)<span class="value-display" id="scaleXValue"
+              >1.0x</span
+            ></label
+          >
+          <input
+            type="range"
+            id="scaleX"
+            min="0.1"
+            max="3"
+            value="1"
+            step="0.05"
+          />
+        </div>
+        <div class="control-group">
+          <label
+            >Petal Length (Stretch)<span class="value-display" id="scaleYValue"
+              >1.5x</span
+            ></label
+          >
+          <input
+            type="range"
+            id="scaleY"
+            min="0.1"
+            max="3"
+            value="1.5"
+            step="0.05"
+          />
+        </div>
+        <div class="control-group">
+          <label
+            >Petal Rotation<span class="value-display" id="petalRotationValue"
+              >0°</span
+            ></label
+          >
+          <input type="range" id="petalRotation" min="0" max="360" value="0" />
+        </div>
+        <div class="control-group">
+          <label for="drawMode">Draw Mode</label>
+          <select id="drawMode">
+            <option value="both" selected>Fill and Stroke</option>
+            <option value="fill">Fill Only</option>
+            <option value="stroke">Stroke Only</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <label for="strokeColor">Stroke Color</label>
+          <input type="color" id="strokeColor" value="#bb86fc" />
+        </div>
+        <div class="control-group">
+          <label for="fillColor">Fill Color</label>
+          <input type="color" id="fillColor" value="#3700b3" />
+        </div>
+      </div>
+      <canvas id="mainCanvas" width="600" height="600"></canvas>
+    </div>
+
+    <script>
+      // --- SETUP ---
+      const canvas = document.getElementById("mainCanvas");
+      const ctx = canvas.getContext("2d");
+      const center = { x: canvas.width / 2, y: canvas.height / 2 };
+
+      const controls = {
+        numPetals: document.getElementById("numPetals"),
+        petalSegments: document.getElementById("petalSegments"),
+        petalDistance: document.getElementById("petalDistance"),
+        petalSize: document.getElementById("petalSize"),
+        scaleX: document.getElementById("scaleX"),
+        scaleY: document.getElementById("scaleY"),
+        petalRotation: document.getElementById("petalRotation"),
+        drawMode: document.getElementById("drawMode"),
+        strokeColor: document.getElementById("strokeColor"),
+        fillColor: document.getElementById("fillColor"),
+      };
+
+      const valueDisplays = {
+        numPetals: document.getElementById("numPetalsValue"),
+        petalSegments: document.getElementById("petalSegmentsValue"),
+        petalDistance: document.getElementById("petalDistanceValue"),
+        petalSize: document.getElementById("petalSizeValue"),
+        scaleX: document.getElementById("scaleXValue"),
+        scaleY: document.getElementById("scaleYValue"),
+        petalRotation: document.getElementById("petalRotationValue"),
+      };
+
+      const shapeNames = {
+        3: "Triangle",
+        4: "Square",
+        5: "Pentagon",
+        6: "Hexagon",
+        7: "Heptagon",
+        8: "Octagon",
+        9: "Nonagon",
+        10: "Decagon",
+      };
+
+      // --- HELPER FUNCTION TO DRAW A REGULAR POLYGON AT ORIGIN (0,0) ---
+      // It no longer needs position or rotation, as this is now handled by canvas transforms.
+      function definePolygonPath(size, sides) {
+        ctx.beginPath();
+        const angleStep = (2 * Math.PI) / sides;
+        for (let i = 0; i <= sides; i++) {
+          // The polygon's base orientation is with a vertex pointing up (along the negative Y axis)
+          const angle = i * angleStep - Math.PI / 2;
+          const px = size * Math.cos(angle);
+          const py = size * Math.sin(angle);
+          if (i === 0) {
+            ctx.moveTo(px, py);
+          } else {
+            ctx.lineTo(px, py);
+          }
+        }
+        ctx.closePath();
+      }
+
+      // --- CORE DRAWING LOGIC ---
+      function drawMandala() {
+        // 1. Get current values from controls
+        const numPetals = parseInt(controls.numPetals.value);
+        const petalSegments = parseInt(controls.petalSegments.value);
+        const petalDistance = parseInt(controls.petalDistance.value);
+        const petalSize = parseInt(controls.petalSize.value);
+        const scaleX = parseFloat(controls.scaleX.value);
+        const scaleY = parseFloat(controls.scaleY.value);
+        const petalRotation =
+          (parseInt(controls.petalRotation.value) * Math.PI) / 180;
+        const drawMode = controls.drawMode.value;
+
+        // 2. Update value displays
+        valueDisplays.numPetals.textContent = numPetals;
+        const shapeName = shapeNames[petalSegments] || `${petalSegments}-gon`;
+        valueDisplays.petalSegments.textContent = `${petalSegments} (${petalSegments > 10 ? "Poly-Circle" : shapeName})`;
+        valueDisplays.petalDistance.textContent = petalDistance;
+        valueDisplays.petalSize.textContent = petalSize;
+        valueDisplays.scaleX.textContent = `${scaleX.toFixed(2)}x`;
+        valueDisplays.scaleY.textContent = `${scaleY.toFixed(2)}x`;
+        valueDisplays.petalRotation.textContent = `${Math.round((petalRotation * 180) / Math.PI)}°`;
+
+        // 3. Prepare canvas
+        ctx.fillStyle = "#1e1e1e";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.strokeStyle = controls.strokeColor.value;
+        ctx.fillStyle = controls.fillColor.value;
+        ctx.lineWidth = 2;
+
+        // 4. Main drawing loop for radial symmetry
+        for (let i = 0; i < numPetals; i++) {
+          const angle = (i / numPetals) * 2 * Math.PI;
+
+          // Use canvas transformations for position, rotation, and scaling.
+          // This ensures scaling is applied relative to the petal's own orientation.
+          ctx.save();
+
+          // Move to the petal's position
+          ctx.translate(
+            center.x + petalDistance * Math.cos(angle),
+            center.y + petalDistance * Math.sin(angle)
+          );
+
+          // Rotate to "point" the petal outwards
+          ctx.rotate(angle + Math.PI / 2); // Add PI/2 because our base polygon points up
+
+          // Apply user-defined rotation and scaling
+          ctx.rotate(petalRotation);
+          ctx.scale(scaleX, scaleY);
+
+          // Define the polygon's path at the new, transformed origin (0,0)
+          definePolygonPath(petalSize, petalSegments);
+
+          // Render the path based on the selected draw mode BEFORE restoring context
+          if (drawMode === "fill" || drawMode === "both") {
+            ctx.fill();
+          }
+          if (drawMode === "stroke" || drawMode === "both") {
+            ctx.stroke();
+          }
+
+          // Restore the context to its original state for the next petal
+          ctx.restore();
+        }
+      }
+
+      // --- EVENT LISTENERS ---
+      Object.values(controls).forEach((control) => {
+        control.addEventListener("input", drawMandala);
+      });
+
+      // --- INITIAL DRAW ---
+      drawMandala();
+    </script>
+  </body>
+</html>
